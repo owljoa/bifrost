@@ -2,22 +2,22 @@ package main
 
 import (
 	"bufio"
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
 
-	"crypto/sha512"
-	"encoding/json"
-
 	"github.com/it-chain/bifrost"
 	"github.com/it-chain/bifrost/conn"
+
+	"crypto/ecdsa"
+
 	"github.com/it-chain/bifrost/mux"
 	"github.com/it-chain/bifrost/pb"
-	"github.com/it-chain/heimdall/auth"
-	"github.com/it-chain/heimdall/key"
+	"github.com/it-chain/heimdall"
 )
 
-func CreateHost(ip string, mux *mux.Mux, pub key.PubKey, pri key.PriKey) *bifrost.BifrostHost {
+func CreateHost(ip string, mux *mux.Mux, pub *ecdsa.PublicKey, pri *ecdsa.PrivateKey) *bifrost.BifrostHost {
 
 	myconnectionInfo := bifrost.NewHostInfo(conn.Address{IP: ip}, pub, pri)
 
@@ -45,31 +45,17 @@ func BuildEnvelope(protocol mux.Protocol, data interface{}) *pb.Envelope {
 	return envelope
 }
 
-func Sign(envelope *pb.Envelope, priKey key.PriKey) *pb.Envelope {
-
-	au, _ := auth.NewAuth()
-
-	hash := sha512.New()
-	hash.Write(envelope.Payload)
-	digest := hash.Sum(nil)
-
-	sig, _ := au.Sign(priKey, digest, auth.EQUAL_SHA512.SignerOptsToPSSOptions())
-	envelope.Signature = sig
+func Sign(envelope *pb.Envelope, priKey *ecdsa.PrivateKey) *pb.Envelope {
+	envelope.Signature, _ = heimdall.Sign(priKey, envelope.Payload, nil, heimdall.SHA384)
 
 	return envelope
 }
 
 func main() {
 
-	km, err := key.NewKeyManager("~/key")
-
-	if err != nil {
-		log.Fatalln(err.Error())
-	}
-
 	defer os.RemoveAll("~/key")
 
-	priv, pub, err := km.GenerateKey(key.RSA4096)
+	priv, err := heimdall.GenerateKey(heimdall.SECP384R1)
 
 	var protocol mux.Protocol
 	protocol = "/echo/1.0"
@@ -81,7 +67,7 @@ func main() {
 	})
 
 	address := "127.0.0.1:7777"
-	host := CreateHost(address, mux, pub, priv)
+	host := CreateHost(address, mux, &priv.PublicKey, priv)
 
 	conn, err := host.ConnectToPeer(bifrost.NewAddress("127.0.0.1:8888"))
 
